@@ -1,0 +1,243 @@
+from tkinter import *
+from tkinter import messagebox
+from tkinter import ttk
+import pandas as pd
+
+from docx import Document
+from docx.shared import Pt
+
+from Treeview import TreeviewDados, exibirNome
+
+janela = Tk()
+janela.title("Gerador Aditivos de Contratos")
+janela.geometry("1600x700")  # Altura maior para acomodar formulário + tabela
+
+janela.grid_rowconfigure(1, weight=1)
+janela.grid_columnconfigure(0, weight=1)
+
+stilo = ttk.Style()
+stilo.theme_use("alt")
+stilo.configure(".", font=("Arial 20"), rowheight=30)
+
+# ==== FRAME SUPERIOR PARA OS CAMPOS DE FORMULÁRIO ====
+frame_formulario = Frame(janela)
+frame_formulario.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+
+# === CAMPOS DE ENTRADA DISTRIBUÍDOS EM VÁRIAS LINHAS ===
+campos = [
+    ("Nome", 0, 0), ("CNPJ", 0, 2), ("№ Solicitação", 0, 4), ("Modelo", 0, 6),
+    ("Cor", 1, 0), ("Valor Unitário", 1, 2), ("Quantidade Veículos", 1, 4), ("Valor Total", 1, 6),
+    ("Franquia Km", 2, 0), ("Prazo de vigência", 2, 2), ("Valor Km Excedente", 2, 4), ("Modalidade de Uso", 2, 6),
+    ("Local de Entrega", 3, 0), ("Data Firmação Contrato", 3, 2)
+]
+
+entries = {}  # Para armazenar todos os Entry se precisar depois
+
+for texto, linha, coluna in campos:
+    label = Label(frame_formulario, text=texto, font=("Arial", 12))
+    label.grid(row=linha, column=coluna, sticky="e", padx=5, pady=5)
+
+    entry = Entry(frame_formulario, font=("Arial", 12), width=25)
+    entry.grid(row=linha, column=coluna + 1, sticky="w", padx=5, pady=5)
+
+    entries[texto] = entry  # Armazena para uso posterior, se quiser pegar valores
+
+# ==== FRAME PARA BOTÕES ====
+frame_botoes = Frame(janela)
+frame_botoes.grid(row=3, column=0, pady=10)
+
+# ==== FUNCÃO BOTÕES ====
+def filtrarDados():
+
+    print("Filtrando dados...")
+
+def gerarContrato():
+    from datetime import datetime
+    from docx import Document
+    from docx.shared import Pt
+
+    def formatar_valor_aluguel(valor):
+        """
+        Formata valores monetários em Real, ex: R$ 4.158,00
+        """
+        try:
+            texto_limpo = str(valor).replace("R$", "").replace(".", "").replace(",", ".").strip()
+            valor_float = float(texto_limpo)
+            return "R$ {:,.2f}".format(valor_float).replace(",", "X").replace(".", ",").replace("X", ".")
+        except:
+            return str(valor)
+
+    def formatar_valor_km(valor):
+        """
+        Formata valores do km excedente, com 2 casas decimais e sem R$
+        Ex: 0,64
+        """
+        try:
+            texto_limpo = str(valor).replace("R$", "").strip()
+            valor_float = float(texto_limpo)
+            return "R$ {:,.2f}".format(valor_float).replace(",", "X").replace(".", ",").replace("X", ".")
+        except:
+            return str(valor)
+
+    def formatar_data(data):
+        try:
+            if isinstance(data, str):
+                data_dt = datetime.strptime(data, "%Y-%m-%d")  # Ajuste o formato conforme seu dado
+            else:
+                data_dt = data
+            return data_dt.strftime("%d/%m/%Y")
+        except:
+            return str(data)
+
+    arquivoWord = Document("Aditivo.docx")
+    estilo = arquivoWord.styles["Normal"]
+    fonte = estilo.font
+    fonte.name = "Arial"
+    fonte.size = Pt(10)
+
+    itens = TreeviewDados.selection()
+    if not itens:
+        messagebox.showwarning("Aviso", "Selecione ao menos uma linha na tabela.")
+        return
+
+    linhas_selecionadas = [TreeviewDados.item(item, "values") for item in itens]
+
+    primeiro = linhas_selecionadas[0]
+    nome_cliente = primeiro[0]
+    cnpj_cliente = primeiro[1]
+    numero_solicitacao = primeiro[2]
+    data_contrato = primeiro[13]
+
+    data_formatada = formatar_data(data_contrato)
+
+    substituicoes_unicas = {
+        "@nome": nome_cliente,
+        "@cnpj": cnpj_cliente,
+        "@numero": numero_solicitacao,
+        "@datacontrato": data_formatada,
+    }
+
+    # Substituir marcadores no texto do documento
+    for paragrafo in arquivoWord.paragraphs:
+        for marcador, valor in substituicoes_unicas.items():
+            if marcador in paragrafo.text:
+                paragrafo.text = paragrafo.text.replace(marcador, str(valor))
+
+    tabela = arquivoWord.tables[0]
+
+    while len(tabela.rows) > 1:
+        tabela._tbl.remove(tabela.rows[1]._tr)
+
+    # Inicializa somas
+    total_veiculos = 0
+    total_valor = 0.0
+
+    for idx, linha in enumerate(linhas_selecionadas, start=1):
+        nova = tabela.add_row().cells
+        nova[0].text = str(idx)
+        nova[1].text = linha[3]  # Modelo
+        nova[2].text = linha[4]  # Cor
+        nova[3].text = formatar_valor_aluguel(linha[5])       # Valor unitário
+        nova[4].text = linha[6]                                # Quantidade Veículos
+        nova[5].text = formatar_valor_aluguel(linha[7])       # Valor total item
+        nova[6].text = linha[8]                                # Franquia Km
+        nova[7].text = linha[9]                                # Prazo de vigência
+        nova[8].text = formatar_valor_km(linha[10])           # Valor Km Excedente (sem R$)
+        nova[9].text = linha[11]                               # Modalidade de Uso
+        nova[10].text = linha[12]                              # Local de Entrega
+
+        try:
+            total_veiculos += int(linha[6])
+            valor_str = linha[7].replace("R$", "").replace(".", "").replace(",", ".").strip()
+            total_valor += float(valor_str)
+        except:
+            pass
+
+            # === Adiciona linha final com totais mesclados ===
+    linha_total = tabela.add_row().cells
+
+    # Mescla colunas 0 a 2 -> "Total de Veículos"
+    celula_total_label = linha_total[0].merge(linha_total[1]).merge(linha_total[2]).merge(linha_total[3])
+    celula_total_label.text = "Total de Veículos"
+
+    # Coluna 4 -> total de veículos
+    linha_total[4].text = str(total_veiculos)
+
+    # Mescla colunas 5 a 8 -> "Valor total mensal"
+    celula_valor_label = linha_total[5].merge(linha_total[6]).merge(linha_total[7]).merge(linha_total[8]).merge(
+        linha_total[9])
+    celula_valor_label.text = "Valor total mensal"
+
+    # Coluna 10 -> valor total formatado
+    valor_formatado = f"R$ {total_valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    linha_total[10].text = valor_formatado
+
+    # Negrito nos campos principais
+    for celula in [celula_total_label, linha_total[3], celula_valor_label, linha_total[9]]:
+        for paragrafo in celula.paragraphs:
+            for run in paragrafo.runs:
+                run.bold = True
+
+    nomeArquivo = f"Aditivo_{nome_cliente.replace(' ', '_')}.docx"
+    caminho = f"C:\\Users\\SEGULA\\Tkinter\\learning-projects\\{nomeArquivo}"
+
+    arquivoWord.save(caminho)
+    messagebox.showinfo("Contrato gerado", f"Contrato salvo em:\n{caminho}")
+
+def gerarTodos():
+
+    print("Todos gerado...")
+
+def preencher_formulario(event):
+    item_selecionado = TreeviewDados.focus()
+    if not item_selecionado:
+        return
+
+    valores = TreeviewDados.item(item_selecionado, 'values')
+
+    # Preenche os campos de entrada com os valores da linha selecionada
+    for (campo, entry), valor in zip(entries.items(), valores):
+        entry.delete(0, END)
+        entry.insert(0, valor)
+
+
+# ==== BOTÕES ====
+btn_pesquisar = Button(frame_botoes, text="Pesquisar", font=("Arial", 12), width=20, bg="#0d6efd", fg="white", command=filtrarDados)
+btn_pesquisar.grid(row=0, column=0, padx=10)
+
+btn_gerar = Button(frame_botoes, text="Gerar Contrato", font=("Arial", 12), width=20, bg="#ffc107", fg="black", command=gerarContrato)
+btn_gerar.grid(row=0, column=1, padx=10)
+
+btn_gerarTodos = Button(frame_botoes, text="Gerar Todos", font=("Arial", 12), width=20, bg="#dc3545", fg="white", command=gerarTodos)
+btn_gerarTodos.grid(row=0, column=2, padx=10)
+
+# ==== TREEVIEW (TABELA) ====
+TreeviewDados = ttk.Treeview(janela, columns=(1,2,3,4,5,6,7,8,9,10,11,12,13,14), show="headings")
+
+titulos = [
+    "Nome", "CNPJ", "№ Solicitação", "Modelo", "Cor", "Valor Unitário", "Quantidade Veículos",
+    "Valor Total", "Franquia Km", "Prazo de vigência", "Valor Km Excedente", "Modalidade de Uso",
+    "Local de Entrega", "Data Firmação Contrato"
+]
+
+for i, titulo in enumerate(titulos, start=1):
+    TreeviewDados.column(str(i), anchor=CENTER)
+    TreeviewDados.heading(i, text=titulo)
+
+TreeviewDados.grid(row=1, column=0, sticky="nsew", pady=10, padx=10)
+
+TreeviewDados.bind("<<TreeviewSelect>>", preencher_formulario)
+
+# ==== SCROLL HORIZONTAL ====
+scroll_x = ttk.Scrollbar(janela, orient=HORIZONTAL, command=TreeviewDados.xview)
+TreeviewDados.configure(xscrollcommand=scroll_x.set)
+scroll_x.grid(row=2, column=0, sticky='ew')
+
+# ==== CARREGAR OS DADOS ====
+dadosUsuarios = pd.read_excel("Dados.xlsx")
+dadosUsuarios["Data Firmação Contrato"] = dadosUsuarios["Data Firmação Contrato"].astype(str)
+
+for i in range(len(dadosUsuarios)):
+    TreeviewDados.insert("", "end", values=tuple(str(dadosUsuarios.iloc[i, j]) for j in range(14)))
+
+janela.mainloop()
